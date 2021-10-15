@@ -9,23 +9,26 @@ from contrast import ImageContraster
 img = Image.open("car.jpg")
 print(np.array(img).shape)
 
+np_arr = np.array(img)
+level = 65536 if np_arr.dtype.name == 'uint16' else 256
+
 # contraster
 icter = ImageContraster()
 
 # HE
-he_eq_img = icter.enhance_contrast(img, method = "HE")
+he_eq_img = icter.enhance_contrast(np_arr, level, method = "HE")
 icter.plot_images(img, he_eq_img)
 
 # AHE
-ahe_eq_img = icter.enhance_contrast(img, method = "AHE", window_size = 32, affect_size = 16)
+ahe_eq_img = icter.enhance_contrast(np_arr, level, method = "AHE", window_size = 32, affect_size = 16)
 icter.plot_images(img, ahe_eq_img)
 
 # CLAHE
-clahe_eq_img = icter.enhance_contrast(img, method = "CLAHE", blocks = 8, threshold = 10.0)
+clahe_eq_img = icter.enhance_contrast(np_arr, level, method = "CLAHE", blocks = 8, threshold = 10.0)
 icter.plot_images(img, clahe_eq_img)
 
 # Local Region Stretch
-lrs_eq_img = icter.enhance_contrast(img, method = "Bright")
+lrs_eq_img = icter.enhance_contrast(np_arr, level, method = "Bright")
 icter.plot_images(img, lrs_eq_img)
 
 
