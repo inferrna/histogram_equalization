@@ -1,17 +1,16 @@
 #-*- coding : utf-8 -*-
 
 from imageio import imread, imwrite
-from multiprocessing import Pool
-
+import numpy as np
 from contrast import ImageContraster
 
-basename = "/tmp/glsl_debayer_rgb_HDR_br"
+basename = "car"
 
 # read image
-img_arr = imread(basename+'.png', 'PNG-FI')
+img_arr: np.ndarray = imread(basename+'.png', 'PNG-FI')
 print("Input pixel type: ", img_arr.dtype.name)
 print(img_arr.shape)
-level = 65536
+level = 256 if img_arr.dtype.name == "uint8" else 65536
 # contraster
 icter = ImageContraster()
 
@@ -39,13 +38,14 @@ def lrs():
     print("saving Local Region Stretch..")
     imwrite(basename+"_LRS.png", lrs_eq_img, 'PNG-FI')
 
+clahe()
 
-
-
-with Pool(processes=4) as pool:
-    pool.apply_async(he)
-    pool.apply_async(ahe)
-    pool.apply_async(clahe)
-    pool.apply_async(lrs)
-    pool.close()
-    pool.join()
+# procs = [Process(target=he), Process(target=ahe), Process(target=clahe), Process(target=lrs)]
+#
+# for proc in procs:
+#     proc.start()
+#
+# with Pool(processes=4) as pool:
+#     [pool.apply_async(proc.join) for proc in procs]
+#     pool.close()
+#     pool.join()
