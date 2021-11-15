@@ -39,11 +39,17 @@ def lrs():
     print("saving Local Region Stretch..")
     imwrite(basename+"_LRS.png", lrs_eq_img, 'PNG-FI')
 
+def standard():
+    print("Compute Local Region Stretch")
+    lrs_eq_img = icter.enhance_contrast(img_arr, level, method = "standard")
+    print("saving Local Region Stretch..")
+    imwrite(basename+"_STD.png", lrs_eq_img, 'PNG-FI')
+
 clahe()
 
 # Test all in once
 
-## procs = [Process(target=lrs), Process(target=he), Process(target=ahe), Process(target=clahe)]
+## procs = [Process(target=lrs), Process(target=he), Process(target=ahe), Process(target=standard), Process(target=clahe)]
 ##
 ## for proc in procs:
 ##     proc.start()

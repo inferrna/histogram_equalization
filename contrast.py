@@ -2,6 +2,7 @@
 
 from PIL import Image, ImageOps
 import numpy as np
+from imageio import imread, imwrite
 from matplotlib import pyplot as plt
 
 
@@ -23,15 +24,15 @@ class ImageContraster():
         ### @return img_res : equalized result
 
         # choose algorithms
-        if method in ["HE", "FHE", "he", "fhe"]:
+        if method.lower() == "he":
             he_func = self.histogram_equalization  # HE
-        elif method in ["AHE", "ahe"]:
+        elif method.lower() == "ahe":
             he_func = self.adaptive_histequal  # AHE
-        elif method in ["CLAHE", "clahe"]:
+        elif method.lower() == "clahe":
             he_func = self.contrast_limited_ahe  # CLAHE
-        elif method in ["standard", "STANDARD", "Standard"]:
+        elif method.lower() in ["std", "standard"]:
             he_func = self.standard_histogram_equalization  # ImageOps HE
-        elif method in ["Bright", "bright", "bright_level"]:
+        elif method.lower() in ["bright", "bright_level", "lrs"]:
             he_func = self.bright_wise_histequal  # Local Region Stretch
 
         # process gray and color images
@@ -103,7 +104,7 @@ class ImageContraster():
 
         # equalization
         (m, n) = img_arr.shape
-        hists_cdf = self.calc_histogram_cdf_(hists, m, n, level, orig_type)  # calculate CDF
+        hists_cdf = self.calc_histogram_cdf_(hists, m*n, level, orig_type)  # calculate CDF
 
         arr = hists_cdf[img_arr]  # mapping
 
@@ -406,9 +407,13 @@ class ImageContraster():
         first_nz, last_nz = np.argwhere(hists>3)[[0, -1]]
         hists_cumsum = np.cumsum(np.array(hists)) + hists[first_nz]
 
-        # Limit contrast range to near original one
-        max_level = (level - 1 + last_nz) / 2
-        min_level = first_nz / 2
+        ## Limit contrast range to near original one
+        #max_level = (level - 1 + last_nz) / 2
+        #min_level = first_nz / 2
+
+        ## Unlimited contrast
+        max_level = (level - 1)
+        min_level = 0
 
         const_a = max_level / max(hists_cumsum.max(), 1)
         hists_cdf = (const_a * hists_cumsum)
@@ -459,3 +464,23 @@ class ImageContraster():
         plt.subplot(122)
         plt.imshow(img2)
         plt.show()
+
+if __name__ == "__main__":
+    import sys
+    methods = ["CLAHE", "AHE", "HE", "LRS", "STD"]
+    try:
+        name_in, name_out, method = sys.argv[1:4]
+    except:
+        print(f"Usage:\n{sys.argv[0]} filename_in filename_out method\nwhere method is one of {', '.join(methods)}")
+        exit(1)
+    ispng = name_in.split(".")[-1].lower() == "png"
+    img_arr = imread(name_in, 'PNG-FI') if ispng else imread(name_in)
+    level = 256 if img_arr.dtype.name == "uint8" else 65536
+    icter = ImageContraster()
+
+    imgout = icter.enhance_contrast(img_arr, level, method = method, window_size = 32, affect_size = 16, blocks = 8, threshold = 10.0)
+
+    if ispng:
+        imwrite(name_out, imgout, 'PNG-FI')
+    else:
+        imwrite(name_out, imgout)
