@@ -4,31 +4,14 @@ from PIL import Image, ImageOps
 import numpy as np
 from matplotlib import pyplot as plt
 
-def flat_intersection_2d(array_xs: np.ndarray, array_ys: np.ndarray, shape):
-    coords: np.ndarray = np.array(np.meshgrid(array_xs, array_ys)).reshape(2, -1)
-    #return np.ravel_multi_index(coords, shape)
-    try:
-        return np.ravel_multi_index(coords, shape)
-    except ValueError as e:
-        print("array_ys = {}, array_xs = {}, shape= {}".format(type(array_ys), type(array_xs), shape))
-        print("array_ys = {}, array_xs = {}, coords = {}".format(array_ys, array_xs, coords))
-        print(e)
-        raise e
-
-def flat_intersection_3d(array_xs: np.ndarray, array_ys: np.ndarray, array_zs: np.ndarray, shape):
-    print("array_ys = {}, array_xs = {}, array_zs = {}".format(type(array_ys), type(array_xs), type(array_zs)))
-    print("array_ys = {}, array_xs = {}, array_zs = {}".format(array_ys.shape, array_xs.shape, array_zs.shape))
-    print("array_ys = {}, array_xs = {}, array_zs = {}".format(array_ys.dtype, array_xs.dtype, array_zs.dtype))
-    print("array_ys = {}, array_xs = {}, array_zs = {}".format(array_ys, array_xs, array_zs, shape))
-    coords: np.ndarray = np.array(np.meshgrid(array_xs, array_ys, array_zs)).reshape(3, -1).astype(np.uint)
-    return np.ravel_multi_index(coords, shape)
 
 class ImageContraster():
     def __init__(self):
         pass
 
-    def enhance_contrast(self, img_arr: np.array_repr, level, method="HE", window_size=32, affect_size=16, blocks=None,
-                         threshold=10.0):
+    def enhance_contrast(self, img_arr: np.array_repr, level, method: str=None, window_size=None, affect_size=None,
+                         blocks=None,
+                         threshold=None):
         ### equalize the histogram
         ### @params img : Image type
         ### @params method : Histogram Equalization Method
@@ -65,11 +48,45 @@ class ImageContraster():
         elif channel_num == 3 or channel_num == 4:
             # RGB image or RGBA image(such as png)
             rgb_arr = [None] * 3
-            # process dividely
-            for k in range(3):
-                rgb_arr[k] = he_func(img_arr[:, :, k], level, window_size=window_size, affect_size=affect_size,
-                                     blocks=blocks, threshold=threshold)
-            img_res = np.array(rgb_arr).transpose((1, 2, 0))
+
+            orig_type = img_arr.dtype.name
+            m, n, _ = img_arr.shape
+
+            float_arr = img_arr.astype(np.float)
+            # y_arr = np.sum((float_arr * np.array([0.299, 0.586, 0.114]).reshape((1,1,3)) ), axis=2) # Y part of YUV
+            # y_arr = np.sum(float_arr, axis=2) / 3.0 # Y part of YUV
+            y_arr = np.max(float_arr, axis=2)  # Y part of YUV
+            y_level = max(level, int(np.ceil(y_arr.max())) + 1)
+
+            equalized_y_arr = he_func(y_arr.round().astype(orig_type), y_level, window_size=window_size,
+                                      affect_size=affect_size,
+                                      blocks=blocks, threshold=threshold)
+
+            y_arr[y_arr < 0.5] = 0.5
+
+            fullcfs = equalized_y_arr.reshape((m, n, 1)) / y_arr.reshape((m, n, 1))
+
+            fullcfs[fullcfs<1.0] = np.power(fullcfs[fullcfs<1.0], 0.05)
+
+            img_res_float = (float_arr * fullcfs)
+            # img_res_float = (float_arr + equalized_y_arr.reshape((m, n, 1)) - y_arr.reshape((m, n, 1)))
+
+            min_val = img_res_float.min()
+
+            if min_val < 0:
+                img_res_float += -min_val
+
+            cf = float(level - 1) / img_res_float.max()
+
+            img_res_float *= cf
+
+            img_res = img_res_float.round().astype(orig_type)
+
+            ## process dividely
+            # for k in range(3):
+            #    rgb_arr[k] = he_func(img_arr[:, :, k], level, window_size=window_size, affect_size=affect_size,
+            #                         blocks=blocks, threshold=threshold)
+            # img_res = np.array(rgb_arr).transpose((1, 2, 0))
 
         return img_res
 
@@ -88,7 +105,6 @@ class ImageContraster():
         (m, n) = img_arr.shape
         hists_cdf = self.calc_histogram_cdf_(hists, m, n, level, orig_type)  # calculate CDF
 
-        arr = np.zeros_like(img_arr)
         arr = hists_cdf[img_arr]  # mapping
 
         return arr
@@ -144,7 +160,7 @@ class ImageContraster():
 
         return arr
 
-    def contrast_limited_ahe(self, img_arr, level, blocks=None, threshold=10.0, **args):
+    def contrast_limited_ahe(self, img_arr, level, blocks, threshold, **args):
         ### equalize the distribution of histogram to enhance contrast, using CLAHE
         ### @params img_arr : numpy.array uint8 type, 2-dim
         ### @params level : the level of gray scale
@@ -152,10 +168,8 @@ class ImageContraster():
         ### @params threshold : clip histogram by exceeding the threshold times of the mean value
         ### @return arr : the equalized image array
         (m, n) = img_arr.shape
-        block_m = 2*int(np.ceil(m / (2*blocks)))
-        block_n = 2*int(np.ceil(n / (2*blocks)))
-        print("m = {}, n = {}".format(m, n))
-        print("block_m = {}, block_n = {}".format(block_m, block_n))
+        block_m = 2 * int(np.ceil(m / (2 * blocks)))
+        block_n = 2 * int(np.ceil(n / (2 * blocks)))
         orig_type = img_arr.dtype.name
 
         # split small regions and calculate the CDF for each, save to a 2-dim list
@@ -173,28 +187,32 @@ class ImageContraster():
                 # calculate histogram and cdf
                 hists = self.calc_histogram_(block_img_arr, level)
                 clip_hists = self.clip_histogram_(hists, threshold=threshold)  # clip histogram
-                hists_cdf = self.calc_histogram_cdf_(clip_hists, block_m, block_n, level, orig_type)
+                hists_cdf = self.calc_histogram_cdf_(clip_hists, block_m * block_n, level, orig_type)
 
+                # hmax = hists_cdf.max()
+                # max_idx = len(hists_cdf[hists_cdf<hmax])+1
+                # self.draw_histograms_([hists[:max_idx], clip_hists[:max_idx], hists_cdf[:max_idx]])
+                # exit(0)
                 # save
                 row_maps.append(hists_cdf)
             maps.append(row_maps)
-
-        print("CLAHE done with maps calculate")
-        print("m = {}, n = {}".format(m, n))
-        print("block_m = {}, block_n = {}".format(block_m, block_n))
         maps: np.ndarray = np.array(maps)
 
         # interpolate every pixel using four nearest mapping functions
         # pay attention to border case
         arr = img_arr.copy()
 
-        block_m_step = round(block_m/2)
-        block_n_step = round(block_n/2)
+        block_m_step = round(block_m / 2)
+        block_n_step = round(block_n / 2)
 
         for m_start in range(0, m, block_m_step):
             for n_start in range(0, n, block_n_step):
-                arr_i = np.array(range(m_start, min(m_start+block_m_step, m)))
-                arr_j = np.array(range(n_start, min(n_start+block_n_step, n)))
+                ri = (m_start, min(m_start + block_m_step, m))
+                rj = (n_start, min(n_start + block_n_step, n))
+                range_i = range(m_start, min(m_start + block_m_step, m))
+                range_j = range(n_start, min(n_start + block_n_step, n))
+                arr_i = np.array(range_i)
+                arr_j = np.array(range_j)
 
                 arr_r: np.ndarray = np.floor((arr_i.astype(np.float32) - block_m_step) / block_m).astype(np.int)
                 arr_c: np.ndarray = np.floor((arr_j.astype(np.float32) - block_n_step) / block_n).astype(np.int)
@@ -207,144 +225,60 @@ class ImageContraster():
 
                 rl: int = arr_r_u[0]
                 cl: int = arr_c_u[0]
-                print("rl = {}, cl = {}'".format(rl, cl))
 
-                # print(f"arr_i = {arr_i}, m = {m}, m_start = {m_start}, block_m = {block_m}")
-                # print(f"arr_j = {arr_j}, n = {n}, n_start = {n_start}, block_n = {block_n}")
-                # print(f"arr_r = {arr_r}")
-                # print(f"arr_c = {arr_c}")
+                arr_x1: np.ndarray = (
+                            (arr_i.astype(np.float32) - (arr_r.astype(np.float32) + 0.5) * block_m) / block_m).astype(
+                    np.float32)
+                arr_y1: np.ndarray = (
+                            (arr_j.astype(np.float32) - (arr_c.astype(np.float32) + 0.5) * block_n) / block_n).astype(
+                    np.float32)
 
-                # exit(0)
+                arr_x1_sub = (1.0 - arr_x1)
+                arr_y1_sub = (1.0 - arr_y1)
 
-                arr_x1: np.ndarray = ((arr_i.astype(np.float32) - (arr_r.astype(np.float32) + 0.5) * block_m) / block_m).astype(np.float32)
-                arr_y1: np.ndarray = ((arr_j.astype(np.float32) - (arr_c.astype(np.float32) + 0.5) * block_n) / block_n).astype(np.float32)
-
-                #Case r < 0 and c < 0:
+                # Case r < 0 and c < 0:
                 if rl < 0 and cl < 0:
-                    arr_flat_coords = flat_intersection_2d(arr_i, arr_j, (m, n))
-                    img_arr_idx: np.ndarray = img_arr.flat[arr_flat_coords]
-                    arr.flat[arr_flat_coords] = maps[rl+1][cl+1][img_arr_idx]
-                    print("CLAHE done with case 'r < 0 and c < 0'")
-
-                #Case r < 0 and c >= blocks - 1:
+                    img_arr_idx: np.ndarray = img_arr[ri[0]:ri[1],rj[0]:rj[1]]
+                    arr[ri[0]:ri[1],rj[0]:rj[1]] = maps[rl + 1][cl + 1][img_arr_idx]
+                # Case r < 0 and c >= blocks - 1:
                 elif rl < 0 and cl >= blocks - 1:
-                    arr_flat_coords = flat_intersection_2d(arr_i, arr_j, (m, n))
-                    img_arr_idx: np.ndarray = img_arr.flat[arr_flat_coords]
-                    arr.flat[arr_flat_coords] = maps[rl+1][cl][img_arr_idx]
-                    print("CLAHE done with case 'r < 0 and c >= blocks - 1'")
-
-                #Case r >= blocks - 1 and c < 0:
+                    img_arr_idx: np.ndarray = img_arr[ri[0]:ri[1],rj[0]:rj[1]]
+                    arr[ri[0]:ri[1],rj[0]:rj[1]] = maps[rl + 1][cl][img_arr_idx]
+                # Case r >= blocks - 1 and c < 0:
                 elif rl >= blocks - 1 and cl < 0:
-                    arr_flat_coords = flat_intersection_2d(arr_i, arr_j, (m, n))
-                    img_arr_idx: np.ndarray = img_arr.flat[arr_flat_coords]
-                    arr.flat[arr_flat_coords] = maps[rl][cl+1][img_arr_idx]
-                    print("CLAHE done with case 'r >= blocks - 1 and c < 0'")
-
-                #Case r >= blocks - 1 and c >= blocks - 1:
+                    img_arr_idx: np.ndarray = img_arr[ri[0]:ri[1],rj[0]:rj[1]]
+                    arr[ri[0]:ri[1],rj[0]:rj[1]] = maps[rl][cl + 1][img_arr_idx]
+                # Case r >= blocks - 1 and c >= blocks - 1:
                 elif rl >= blocks - 1 and cl >= blocks - 1:
-                    arr_flat_coords = flat_intersection_2d(arr_i, arr_j, (m, n))
-                    img_arr_idx = img_arr.flat[arr_flat_coords]
-                    arr.flat[arr_flat_coords] = maps[rl][cl][img_arr_idx]
-                    print("CLAHE done with case 'r >= blocks - 1 and c >= blocks - 1'")
-
-                #Case r < 0 or r >= blocks - 1:
+                    img_arr_idx: np.ndarray = img_arr[ri[0]:ri[1],rj[0]:rj[1]]
+                    arr[ri[0]:ri[1],rj[0]:rj[1]] = maps[rl][cl][img_arr_idx]
+                # Case r < 0 or r >= blocks - 1:
                 elif rl < 0 or rl >= blocks - 1:
-
-                    arr_flat_coords = flat_intersection_2d(arr_i, arr_j, (m, n))
-                    img_arr_idx: np.ndarray = img_arr.flat[arr_flat_coords]
-                    rc = min(max(rl,0), blocks - 1)
-
-                    mapped_left: np.ndarray = (1-arr_y1).reshape(-1,1) * maps[rc][cl][img_arr_idx].reshape(-1, arr_x1.shape[0])
-                    mapped_right: np.ndarray = arr_y1.reshape(-1,1) * maps[rc][cl+1][img_arr_idx].reshape(-1, arr_x1.shape[0])
-                    #mapped_v: np.ndarray = arr_x1 * maps[rc+1][cl][img_arr_idx].reshape(arr_x1.shape[0], -1) if rc==0 else (1-arr_x1) * maps[rc][cl][img_arr_idx].reshape(arr_x1.shape[0], -1)
-
-
-                    mapped_mult_sum: np.ndarray = mapped_left + mapped_right# + mapped_v
-                    arr.flat[arr_flat_coords] = mapped_mult_sum.flat
-                    print("CLAHE done with case 'r < 0 or r >= blocks - 1'")
-
-                #Case c < 0 or c >= blocks - 1:
+                    img_arr_idx: np.ndarray = img_arr[ri[0]:ri[1],rj[0]:rj[1]]
+                    rc = min(max(rl, 0), blocks - 1)
+                    mapped_left: np.ndarray = arr_y1_sub * maps[rc][cl][img_arr_idx]
+                    mapped_right: np.ndarray = arr_y1 * maps[rc][cl + 1][img_arr_idx]
+                    mapped_mult_sum: np.ndarray = mapped_left + mapped_right  # + mapped_v
+                    arr[ri[0]:ri[1],rj[0]:rj[1]] = mapped_mult_sum
+                # Case c < 0 or c >= blocks - 1:
                 elif cl < 0 or cl >= blocks - 1:
-                    print("Entering case 'c < 0 or c >= blocks - 1'")
-                    arr_flat_coords = flat_intersection_2d(arr_i, arr_j, (m, n))
-                    img_arr_idx: np.ndarray = np.array(img_arr.flat[arr_flat_coords]).astype(np.uint)
-                    cc = min(max(cl,0), blocks - 1)
-
-                    mapped_up = maps[rl][cc][img_arr_idx].reshape(-1, arr_x1.shape[0])
-                    mapped_bottom = maps[rl+1][cc][img_arr_idx].reshape(-1, arr_x1.shape[0])
-                    mapped_mult_sum: np.ndarray = mapped_up * (1-arr_x1) + mapped_bottom * arr_x1
-                    arr.flat[arr_flat_coords] = mapped_mult_sum.flat
-                    print("CLAHE done with case 'c < 0 or c >= blocks - 1'")
-
-                #Inner case
+                    img_arr_idx: np.ndarray = img_arr[ri[0]:ri[1],rj[0]:rj[1]]
+                    cc = min(max(cl, 0), blocks - 1)
+                    mapped_up = maps[rl][cc][img_arr_idx]
+                    mapped_bottom = maps[rl + 1][cc][img_arr_idx]
+                    mapped_mult_sum: np.ndarray = mapped_up * arr_x1_sub[:,np.newaxis] + mapped_bottom * arr_x1[:,np.newaxis]
+                    arr[ri[0]:ri[1],rj[0]:rj[1]] =  mapped_mult_sum
+                # Inner case
                 else:
-                    print("Entering inner case")
-
-                    arr_flat_coords = flat_intersection_2d(arr_i, arr_j, (m, n))
-                    img_arr_idx: np.ndarray = img_arr.flat[arr_flat_coords]
-
-                    #print(arr_c[j_indices_inn_offset])
-                    mapped_lu = maps[rl][cl][img_arr_idx].reshape(-1, arr_x1.shape[0])
-                    mapped_lb = maps[rl+1][cl][img_arr_idx].reshape(-1, arr_x1.shape[0])
-                    mapped_ru = maps[rl][cl+1][img_arr_idx].reshape(-1, arr_x1.shape[0])
-                    mapped_rb = maps[rl+1][cl+1][img_arr_idx].reshape(-1, arr_x1.shape[0])
-                    mapped_mult_sum: np.ndarray = (1.0 - arr_y1).reshape(-1,1) * ((1 - arr_x1) * mapped_lu + arr_x1 * mapped_lb)\
-                                                + arr_y1.reshape(-1,1) * ((1.0 - arr_x1) * mapped_ru + arr_x1 * mapped_rb)
-                    #print(rl, cl)
-                    arr.flat[arr_flat_coords] = mapped_mult_sum.flat
-                    print("CLAHE done with inner case")
-                    #break
-                #break
+                    img_arr_idx: np.ndarray = img_arr[ri[0]:ri[1],rj[0]:rj[1]]
+                    mapped_lu = maps[rl][cl][img_arr_idx]
+                    mapped_lb = maps[rl + 1][cl][img_arr_idx]
+                    mapped_ru = maps[rl][cl + 1][img_arr_idx]
+                    mapped_rb = maps[rl + 1][cl + 1][img_arr_idx]
+                    mapped_mult_sum: np.ndarray = arr_y1_sub * (arr_x1_sub[:,np.newaxis] * mapped_lu + arr_x1[:,np.newaxis] * mapped_lb) \
+                                                  + arr_y1 * (arr_x1_sub[:,np.newaxis] * mapped_ru + arr_x1[:,np.newaxis] * mapped_rb)
+                    arr[ri[0]:ri[1],rj[0]:rj[1]] = mapped_mult_sum
         return arr.astype(orig_type)
-
-        for i in range(m):
-            for j in range(n):
-                r = int((i - block_m / 2) / block_m)  # the row index of the left-up mapping function
-                c = int((j - block_n / 2) / block_n)  # the col index of the left-up mapping function
-
-                x1 = (i - (r + 0.5) * block_m) / block_m  # the x-axis distance to the left-up mapping center
-                y1 = (j - (c + 0.5) * block_n) / block_n  # the y-axis distance to the left-up mapping center
-
-                lu = 0  # mapping value of the left up cdf
-                lb = 0  # left bottom
-                ru = 0  # right up
-                rb = 0  # right bottom
-
-                # four corners use the nearest mapping directly
-                if r < 0 and c < 0:
-                    arr[i][j] = maps[r + 1][c + 1][img_arr[i][j]]
-                elif r < 0 and c >= blocks - 1:
-                    arr[i][j] = maps[r + 1][c][img_arr[i][j]]
-                elif r >= blocks - 1 and c < 0:
-                    arr[i][j] = maps[r][c + 1][img_arr[i][j]]
-                elif r >= blocks - 1 and c >= blocks - 1:
-                    arr[i][j] = maps[r][c][img_arr[i][j]]
-                # four border case using the nearest two mapping : linear interpolate
-                elif r < 0 or r >= blocks - 1:
-                    if r < 0:
-                        r = 0
-                    elif r > blocks - 1:
-                        r = blocks - 1
-                    left = maps[r][c][img_arr[i][j]]
-                    right = maps[r][c + 1][img_arr[i][j]]
-                    arr[i][j] = (1 - y1) * left + y1 * right
-                elif c < 0 or c >= blocks - 1:
-                    if c < 0:
-                        c = 0
-                    elif c > blocks - 1:
-                        c = blocks - 1
-                    up = maps[r][c][img_arr[i][j]]
-                    bottom = maps[r + 1][c][img_arr[i][j]]
-                    arr[i][j] = (1 - x1) * up + x1 * bottom
-                # bilinear interpolate for inner pixels
-                else:
-                    lu = maps[r][c][img_arr[i][j]]
-                    lb = maps[r + 1][c][img_arr[i][j]]
-                    ru = maps[r][c + 1][img_arr[i][j]]
-                    rb = maps[r + 1][c + 1][img_arr[i][j]]
-                    arr[i][j] = (1 - y1) * ((1 - x1) * lu + x1 * lb) + y1 * ((1 - x1) * ru + x1 * rb)
-        arr = arr.astype(orig_type)
-        return arr
 
     def bright_wise_histequal(self, img_arr, level, **args):
         ### split the image to three level accoding brightness, equalize histogram dividely
@@ -460,27 +394,33 @@ class ImageContraster():
         hists = np.zeros((level), dtype=int)
         uniq_idxs, counts = np.unique(gray_arr, return_counts=True)
         hists[uniq_idxs] += counts
-        # hists2 = np.zeros((level), dtype=int)
-        # for row in gray_arr:
-        #     hists2[row] += 1
-        # print(hists)
-        # print(hists2)
-        # exit(0)
         return hists
 
-    def calc_histogram_cdf_(self, hists, block_m, block_n, level, orig_type):
+    def calc_histogram_cdf_(self, hists, block_mn, level, orig_type):
         ### calculate the CDF of the hists
         ### @params hists : list type
         ### @params block_m : the histogram block's height
         ### @params block_n : the histogram block's width
         ### @params level : the level of gray scale
         ### @return hists_cdf : numpy.array type
-        hists_cumsum = np.cumsum(np.array(hists))
-        const_a = (level - 1) / (block_m * block_n)
-        hists_cdf = (const_a * hists_cumsum).astype(orig_type)
-        return hists_cdf
+        first_nz, last_nz = np.argwhere(hists>3)[[0, -1]]
+        hists_cumsum = np.cumsum(np.array(hists)) + hists[first_nz]
 
-    def clip_histogram_(self, hists, threshold=10.0):
+        # Limit contrast range to near original one
+        max_level = (level - 1 + last_nz) / 2
+        min_level = first_nz / 2
+
+        const_a = max_level / max(hists_cumsum.max(), 1)
+        hists_cdf = (const_a * hists_cumsum)
+
+        cf = (float(max_level) - min_level) / max_level
+
+        hists_cdf *= cf
+        hists_cdf += min_level
+
+        return hists_cdf.round().astype(orig_type)
+
+    def clip_histogram_(self, hists, threshold):
         ### clip the peak of histogram, and separate it to all levels uniformly
         ### @params hists : list type
         ### @params threshold : the top ratio of hists over mean value
@@ -496,10 +436,17 @@ class ImageContraster():
 
         return clip_hists
 
-    def draw_histogram_(self, hists):
+    def draw_histogram_(self, hist):
         ### draw a bar picture of the given histogram
         plt.figure()
-        plt.bar(range(len(hists)), hists)
+        plt.bar(range(len(hist)), hist)
+        plt.show()
+
+    def draw_histograms_(self, hists):
+        ### draw a bar picture of the given histogram
+        plt.figure()
+        for hist in hists:
+            plt.plot(range(len(hist)), hist)
         plt.show()
 
     def plot_images(self, img1, img2):

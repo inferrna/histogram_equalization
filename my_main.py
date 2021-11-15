@@ -1,4 +1,5 @@
 #-*- coding : utf-8 -*-
+from multiprocessing import Process, Pool
 
 from imageio import imread, imwrite
 import numpy as np
@@ -40,12 +41,14 @@ def lrs():
 
 clahe()
 
-# procs = [Process(target=he), Process(target=ahe), Process(target=clahe), Process(target=lrs)]
-#
-# for proc in procs:
-#     proc.start()
-#
-# with Pool(processes=4) as pool:
-#     [pool.apply_async(proc.join) for proc in procs]
-#     pool.close()
-#     pool.join()
+# Test all in once
+
+## procs = [Process(target=lrs), Process(target=he), Process(target=ahe), Process(target=clahe)]
+##
+## for proc in procs:
+##     proc.start()
+##
+## with Pool(processes=4) as pool:
+##     [pool.apply_async(proc.join) for proc in procs]
+##     pool.close()
+##     pool.join()
