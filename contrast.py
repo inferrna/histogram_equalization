@@ -53,45 +53,30 @@ class ImageContraster():
             orig_type = img_arr.dtype.name
             m, n, _ = img_arr.shape
 
-            float_arr = img_arr.astype(np.float)
             # y_arr = np.sum((float_arr * np.array([0.299, 0.586, 0.114]).reshape((1,1,3)) ), axis=2) # Y part of YUV
             # y_arr = np.sum(float_arr, axis=2) / 3.0 # Y part of YUV
-            y_arr = np.max(float_arr, axis=2)  # Y part of YUV
-            y_level = max(level, int(np.ceil(y_arr.max())) + 1)
+            y_arr = np.max(img_arr, axis=2)  # Y part of YUV
 
-            equalized_y_arr = he_func(y_arr.round().astype(orig_type), y_level, window_size=window_size,
+            equalized_y_arr = he_func(y_arr, level, window_size=window_size,
                                       affect_size=affect_size,
                                       blocks=blocks, threshold=threshold)
 
-            y_arr[y_arr < 0.5] = 0.5
+            y_arr[y_arr == 0] = 1
 
-            fullcfs = equalized_y_arr.reshape((m, n, 1)) / y_arr.reshape((m, n, 1))
+            img_res_float = (img_arr.astype(np.single) * equalized_y_arr.reshape((m, n, 1)) / y_arr.reshape((m, n, 1)).astype(np.single))
 
-            fullcfs[fullcfs<1.0] = np.power(fullcfs[fullcfs<1.0], 0.05)
+            #min_val = img_res_float.min()
 
-            img_res_float = (float_arr * fullcfs)
-            # img_res_float = (float_arr + equalized_y_arr.reshape((m, n, 1)) - y_arr.reshape((m, n, 1)))
-
-            min_val = img_res_float.min()
-
-            if min_val < 0:
-                img_res_float += -min_val
-
-            cf = float(level - 1) / img_res_float.max()
-
-            img_res_float *= cf
+            #if min_val < 0:
+            #    img_res_float += -min_val
+            #cf = float(level - 1) / img_res_float.max()
+            #img_res_float *= cf
 
             img_res = img_res_float.round().astype(orig_type)
 
-            ## process dividely
-            # for k in range(3):
-            #    rgb_arr[k] = he_func(img_arr[:, :, k], level, window_size=window_size, affect_size=affect_size,
-            #                         blocks=blocks, threshold=threshold)
-            # img_res = np.array(rgb_arr).transpose((1, 2, 0))
-
         return img_res
 
-    def histogram_equalization(self, img_arr, level, **args):
+    def histogram_equalization(self, img_arr, level, threshold=None, **args):
         ### equalize the distribution of histogram to enhance contrast
         ### @params img_arr : numpy.array uint8 type, 2-dim
         ### @params level : the level of gray scale
@@ -101,10 +86,10 @@ class ImageContraster():
 
         # calculate hists
         hists = self.calc_histogram_(img_arr, level)
-
+        clip_hist = self.clip_histogram_(hists, threshold=threshold)  # clip histogram
         # equalization
         (m, n) = img_arr.shape
-        hists_cdf = self.calc_histogram_cdf_(hists, m*n, level, orig_type)  # calculate CDF
+        hists_cdf = self.calc_histogram_cdf_(clip_hist, m*n, level, orig_type)  # calculate CDF
 
         arr = hists_cdf[img_arr]  # mapping
 
@@ -190,18 +175,13 @@ class ImageContraster():
                 clip_hists = self.clip_histogram_(hists, threshold=threshold)  # clip histogram
                 hists_cdf = self.calc_histogram_cdf_(clip_hists, block_m * block_n, level, orig_type)
 
-                # hmax = hists_cdf.max()
-                # max_idx = len(hists_cdf[hists_cdf<hmax])+1
-                # self.draw_histograms_([hists[:max_idx], clip_hists[:max_idx], hists_cdf[:max_idx]])
-                # exit(0)
-                # save
                 row_maps.append(hists_cdf)
             maps.append(row_maps)
         maps: np.ndarray = np.array(maps)
 
         # interpolate every pixel using four nearest mapping functions
         # pay attention to border case
-        arr = img_arr.copy()
+        arr = img_arr.copy().astype(np.float32)
 
         block_m_step = round(block_m / 2)
         block_n_step = round(block_n / 2)
@@ -227,12 +207,8 @@ class ImageContraster():
                 rl: int = arr_r_u[0]
                 cl: int = arr_c_u[0]
 
-                arr_x1: np.ndarray = (
-                            (arr_i.astype(np.float32) - (arr_r.astype(np.float32) + 0.5) * block_m) / block_m).astype(
-                    np.float32)
-                arr_y1: np.ndarray = (
-                            (arr_j.astype(np.float32) - (arr_c.astype(np.float32) + 0.5) * block_n) / block_n).astype(
-                    np.float32)
+                arr_x1: np.ndarray = (arr_i.astype(np.float32) / block_m - arr_r.astype(np.float32) - 0.5).astype(np.float32)
+                arr_y1: np.ndarray = (arr_j.astype(np.float32) / block_n - arr_c.astype(np.float32) - 0.5).astype(np.float32)
 
                 arr_x1_sub = (1.0 - arr_x1)
                 arr_y1_sub = (1.0 - arr_y1)
@@ -392,7 +368,7 @@ class ImageContraster():
         ### @params gray_arr : numpy.array uint8 type, 2-dim
         ### @params level : the level of gray scale
         ### @return hists : list type
-        hists = np.zeros((level), dtype=int)
+        hists = np.zeros((level), dtype=np.single)
         uniq_idxs, counts = np.unique(gray_arr, return_counts=True)
         hists[uniq_idxs] += counts
         return hists
@@ -405,7 +381,7 @@ class ImageContraster():
         ### @params level : the level of gray scale
         ### @return hists_cdf : numpy.array type
         first_nz, last_nz = np.argwhere(hists>3)[[0, -1]]
-        hists_cumsum = np.cumsum(np.array(hists)) + hists[first_nz]
+        hists_cumsum = np.cumsum(np.array(hists))
 
         ## Limit contrast range to near original one
         #max_level = (level - 1 + last_nz) / 2
@@ -416,14 +392,11 @@ class ImageContraster():
         min_level = 0
 
         const_a = max_level / max(hists_cumsum.max(), 1)
-        hists_cdf = (const_a * hists_cumsum)
-
         cf = (float(max_level) - min_level) / max_level
+        hists_cumsum *= cf * const_a
+        hists_cumsum += min_level
 
-        hists_cdf *= cf
-        hists_cdf += min_level
-
-        return hists_cdf.round().astype(orig_type)
+        return hists_cumsum
 
     def clip_histogram_(self, hists, threshold):
         ### clip the peak of histogram, and separate it to all levels uniformly
@@ -435,9 +408,9 @@ class ImageContraster():
         total_extra = (hists[hists >= threshold_value] - threshold_value).sum()
         mean_extra = total_extra / len(hists)
 
-        clip_hists = np.zeros((len(hists)), dtype=int)
-        clip_hists[hists >= threshold_value] = int(threshold_value + mean_extra)
-        clip_hists[hists < threshold_value] = (hists[hists < threshold_value] + mean_extra).astype(int)
+        clip_hists = np.zeros((len(hists)), dtype=np.single)
+        clip_hists[hists >= threshold_value] = threshold_value + mean_extra
+        clip_hists[hists < threshold_value] = hists[hists < threshold_value] + mean_extra
 
         return clip_hists
 
