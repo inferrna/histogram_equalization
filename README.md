@@ -1,29 +1,29 @@
 # histogram_equalization
 Some histogram equalization methods to enhance image contrast, including AHE and CLAHE.
+```diff
++In this fork some optimizations were applied. 
++Especially CLAHE is about 10 times faster comparing to the original implementation.
+```
 
-* 知乎链接
-* 代码架构
-* 方法
+## Supported methods
   * ImageOps HE
   * HE  
   * AHE
   * CLAHE  
   * Local Region Stretch HE
-* 结果展示
 
-## 知乎(zhihu)链接
-  * [直方图均衡化](https://zhuanlan.zhihu.com/p/44918476)
+## Original paper
+  * (https://zhuanlan.zhihu.com/p/44918476)
 
-## 代码架构
- * contrast.py  各种直方图均衡化实现的脚本，ImageContraster类
- * main.py  测试，使用方法参考main.py
- * python3.6
+## Code architecture
+ * contrast.py  Script for realizing various histogram equalization, ImageContraster class. Also runnable: `python3 contrast.py image_in.jpg image_out.jpg method`
+ * main.py, my_main.py Testing scripts
 
-## 方法
-  * 代码实现了五种直方图均衡化的方法，分别是：1.利用PIL.ImageOps实现的直方图均衡化；2.自己实现的直方图均衡化HE；3.自适应直方图均衡化AHE；4.限制对比度自适应直方图均衡化CLAHE;5.自适应局部区域伸展直方图均衡化Local Region Stretch HE。其原理详细介绍见知乎链接。
+## method
+  * The code implements five histogram equalization methods, which are: 1. Histogram equalization using PIL.ImageOps; 2. Histogram equalization HE implemented by yourself; 3. Adaptive histogram equalization AHE; 4. . Contrast-limited adaptive histogram equalization CLAHE; 5. Adaptive local region stretch histogram equalization Local Region Stretch HE. The principle is explained in detail in the link to know.
 
-## 结果展示
-  下面给出一些结果图片,每组有六张图片，分别是原图、ImageOps HE、HE、AHE、CLAHE、Local Region Stretch HE的结果对比：
+## Result display
+  * Here are some result pictures, each group has six pictures, which are the original picture, ImageOps HE, HE, AHE, CLAHE, Local Region Stretch HE. Results comparison: 
   <div> 
     <table>
      <tr>
