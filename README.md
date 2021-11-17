@@ -3,6 +3,7 @@ Some histogram equalization methods to enhance image contrast, including AHE and
 ```diff
 +In this fork some optimizations were applied. 
 +Especially CLAHE is about 10 times faster comparing to the original implementation.
++Added support of 16-bit png images
 ```
 
 ## Supported methods
